@@ -140,6 +140,52 @@ func TestNestedCompressedLabel(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestChainedCompressedLabel(t *testing.T) {
+	data := []byte{
+		// example.com
+		7, 'e', 'x', 'a', 'm', 'p', 'l', 'e', 3, 'c', 'o', 'm', 0,
+		// a.example.com
+		1, 'a', 192, 0,
+		// b.a.example.com: a pointer to a name that ends with a pointer
+		1, 'b', 192, 13,
+	}
+	labels, err := FromBytes(data)
+	require.NoError(t, err)
+	require.Equal(t, []string{"example.com", "a.example.com", "b.a.example.com"}, labels.Labels)
+}
+
+func TestInvalidCompressedLabel(t *testing.T) {
+	for name, data := range map[string][]byte{
+		"pointer to itself":      {192, 0},
+		"forward pointer":        {192, 2, 1, 'a', 0},
+		"pointer into the name":  {1, 'a', 192, 0},
+		"loop through two names": {1, 'a', 192, 4, 1, 'b', 192, 0},
+		"pointer past the end":   {1, 'a', 0, 192, 9},
+		"reserved label type 01": append([]byte{0x41}, make([]byte, 65)...),
+		"reserved label type 10": append([]byte{0x81}, make([]byte, 129)...),
+	} {
+		if _, err := FromBytes(data); err == nil {
+			t.Errorf("%s: no error", name)
+		}
+	}
+}
+
+func TestLongName(t *testing.T) {
+	name := func(last int) []byte {
+		var b []byte
+		for _, n := range []int{63, 63, 63, last} {
+			b = append(b, byte(n))
+			b = append(b, make([]byte, n)...)
+		}
+		return append(b, 0)
+	}
+	// Three labels of 63, one of 61 and the root label: 255 octets.
+	_, err := FromBytes(name(61))
+	require.NoError(t, err)
+	_, err = FromBytes(name(62))
+	require.Error(t, err)
+}
+
 func FuzzLabel(f *testing.F) {
 
 	f.Add([]byte{0x5, 0xaa, 0xbb})

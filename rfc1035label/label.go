@@ -93,57 +93,70 @@ func FromBytes(data []byte) (*Labels, error) {
 // length or missing bytes.
 var ErrBufferTooShort = errors.New("rfc1035label: buffer too short")
 
-// fromBytes decodes a serialized stream and returns a list of labels
+// maxNameLen is the longest name in wire format, with the root label
+// (RFC 1035 section 3.1).
+const maxNameLen = 255
+
+// fromBytes decodes a serialized stream and returns a list of labels.
+//
+// A compression pointer must point to a prior occurrence (RFC 1035 section
+// 4.1.4): before the start of the name and before the target of the
+// previous pointer of the name, which also rules out loops. Pointers may
+// lead to names that end with a pointer themselves.
 func labelsFromBytes(buf []byte) ([]string, error) {
-	var (
-		labels          = make([]string, 0)
-		pos, oldPos     int
-		label           string
-		handlingPointer bool
-	)
-
-	for {
-		if pos >= len(buf) {
-			// interpret label without trailing zero-length byte as a partial
-			// domain name field as per RFC 4704 Section 4.2
-			if label != "" {
-				labels = append(labels, label)
+	labels := make([]string, 0)
+	for pos := 0; pos < len(buf); {
+		var parts []string
+		wire, barrier, next := 1, pos, -1
+	name:
+		for {
+			if pos >= len(buf) {
+				// interpret label without trailing zero-length byte as a
+				// partial domain name field as per RFC 4704 Section 4.2;
+				// a name a pointer leads to must end.
+				if next >= 0 {
+					return nil, ErrBufferTooShort
+				}
+				if len(parts) > 0 {
+					labels = append(labels, strings.Join(parts, "."))
+				}
+				return labels, nil
 			}
-
-			break
+			length := int(buf[pos])
+			pos++
+			switch {
+			case length == 0:
+				labels = append(labels, strings.Join(parts, "."))
+				break name
+			case length&0xc0 == 0xc0:
+				if pos >= len(buf) {
+					return nil, errors.New("rfc1035label: pointer buffer too short")
+				}
+				ptr := (length&^0xc0)<<8 | int(buf[pos])
+				pos++
+				if ptr >= barrier {
+					return nil, errors.New("rfc1035label: pointer does not point to a prior occurrence")
+				}
+				barrier = ptr
+				if next < 0 {
+					next = pos
+				}
+				pos = ptr
+			case length&0xc0 != 0:
+				return nil, errors.New("rfc1035label: reserved label type")
+			default:
+				if pos+length > len(buf) {
+					return nil, ErrBufferTooShort
+				}
+				if wire += 1 + length; wire > maxNameLen {
+					return nil, errors.New("rfc1035label: name longer than 255 octets")
+				}
+				parts = append(parts, string(buf[pos:pos+length]))
+				pos += length
+			}
 		}
-		length := int(buf[pos])
-		pos++
-		var chunk string
-		if length == 0 {
-			labels = append(labels, label)
-			label = ""
-			if handlingPointer {
-				pos = oldPos
-				handlingPointer = false
-			}
-		} else if length&0xc0 == 0xc0 {
-			// compression pointer
-			if handlingPointer {
-				return nil, errors.New("rfc1035label: cannot handle nested pointers")
-			}
-			handlingPointer = true
-			if pos+1 > len(buf) {
-				return nil, errors.New("rfc1035label: pointer buffer too short")
-			}
-			off := int(buf[pos-1]&^0xc0)<<8 + int(buf[pos])
-			oldPos = pos + 1
-			pos = off
-		} else {
-			if pos+length > len(buf) {
-				return nil, ErrBufferTooShort
-			}
-			chunk = string(buf[pos : pos+length])
-			if label != "" {
-				label += "."
-			}
-			label += chunk
-			pos += length
+		if next >= 0 {
+			pos = next
 		}
 	}
 	return labels, nil
