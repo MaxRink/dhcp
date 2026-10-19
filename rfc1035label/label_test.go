@@ -156,13 +156,16 @@ func TestChainedCompressedLabel(t *testing.T) {
 
 func TestInvalidCompressedLabel(t *testing.T) {
 	for name, data := range map[string][]byte{
-		"pointer to itself":      {192, 0},
-		"forward pointer":        {192, 2, 1, 'a', 0},
-		"pointer into the name":  {1, 'a', 192, 0},
-		"loop through two names": {1, 'a', 192, 4, 1, 'b', 192, 0},
-		"pointer past the end":   {1, 'a', 0, 192, 9},
-		"reserved label type 01": append([]byte{0x41}, make([]byte, 65)...),
-		"reserved label type 10": append([]byte{0x81}, make([]byte, 129)...),
+		"pointer to itself":                         {192, 0},
+		"forward pointer":                           {192, 2, 1, 'a', 0},
+		"pointer into the name":                     {1, 'a', 192, 0},
+		"loop through two names":                    {1, 'a', 192, 4, 1, 'b', 192, 0},
+		"pointer past the end":                      {1, 'a', 0, 192, 9},
+		"loop through a moved barrier":              {6, 'q', 0xc0, 0x05, 'r', 0xc0, 0x02, 0, 0xc0, 0x02},
+		"pointer into the name with a label before": {1, 'a', 0, 1, 0, 0xc0, 0x04},
+		"pointed name runs past the end":            {1, 3, 0, 0xc0, 0x01},
+		"reserved label type 01":                    append([]byte{0x41}, make([]byte, 65)...),
+		"reserved label type 10":                    append([]byte{0x81}, make([]byte, 129)...),
 	} {
 		if _, err := FromBytes(data); err == nil {
 			t.Errorf("%s: no error", name)
