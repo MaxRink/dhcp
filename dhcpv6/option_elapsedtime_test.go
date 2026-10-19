@@ -1,6 +1,7 @@
 package dhcpv6
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"reflect"
@@ -72,5 +73,20 @@ func TestOptElapsedTimeString(t *testing.T) {
 	expected := "Elapsed Time: 100ms"
 	if optString := opt.String(); optString != expected {
 		t.Fatalf("Invalid elapsed time string. Expected %v, got %v", expected, optString)
+	}
+}
+
+func TestOptElapsedTimeSaturates(t *testing.T) {
+	for _, tt := range []struct {
+		d    time.Duration
+		want []byte
+	}{
+		{655350 * time.Millisecond, []byte{0xff, 0xff}},
+		{700 * time.Second, []byte{0xff, 0xff}},
+		{-time.Second, []byte{0, 0}},
+	} {
+		if got := OptElapsedTime(tt.d).ToBytes(); !bytes.Equal(got, tt.want) {
+			t.Errorf("OptElapsedTime(%s) = %x, want %x", tt.d, got, tt.want)
+		}
 	}
 }

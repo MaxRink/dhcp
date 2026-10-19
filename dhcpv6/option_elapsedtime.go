@@ -2,6 +2,7 @@ package dhcpv6
 
 import (
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/u-root/uio/uio"
@@ -24,7 +25,9 @@ func (*optElapsedTime) Code() OptionCode {
 // ToBytes marshals this option to bytes.
 func (op *optElapsedTime) ToBytes() []byte {
 	buf := uio.NewBigEndianBuffer(nil)
-	buf.Write16(uint16(op.ElapsedTime.Round(10*time.Millisecond) / (10 * time.Millisecond)))
+	// RFC 8415 Section 21.9: 0xffff stands for any longer time.
+	cs := op.ElapsedTime.Round(10*time.Millisecond) / (10 * time.Millisecond)
+	buf.Write16(uint16(min(max(cs, 0), math.MaxUint16)))
 	return buf.Data()
 }
 
